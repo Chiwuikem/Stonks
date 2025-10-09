@@ -1,0 +1,17 @@
+{
+  "name": "StreetLens (Java + Python)",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "features": {},
+  "customizations": {
+    "vscode": {
+      "extensions": [
+        "vscjava.vscode-java-pack",
+        "ms-python.python",
+        "ms-python.vscode-pylance"
+      ]
+    }
+  },
+  "postCreateCommand": "cd java && mvn -q -DskipTests package || true"
+}
