@@ -1,0 +1,14 @@
+# Ignore virtual environments
+pyclient/stockspy/
+venv/
+.env/
+__pycache__/
+*.pyc
+
+# Ignore IDE/OS files
+.vscode/
+.idea/
+.DS_Store
+
+# Ignore dependency folders
+node_modules/

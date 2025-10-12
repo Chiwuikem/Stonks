@@ -36,8 +36,21 @@
       <version>2.0.13</version>
     </dependency>
   </dependencies>
+
+
   <build>
     <plugins>
+      <!-- Run the app via: mvn exec:java -->
+      <plugin>
+        <groupId>org.codehaus.mojo</groupId>
+        <artifactId>exec-maven-plugin</artifactId>
+        <version>3.1.0</version>
+        <configuration>
+        
+          <mainClass>com.streetlens.options.api.ApiServer</mainClass>
+        </configuration>
+      </plugin>
+
       <!-- Build a fat/uber JAR that includes dependencies -->
       <plugin>
         <groupId>org.apache.maven.plugins</groupId>
@@ -52,6 +65,12 @@
             <configuration>
               <shadedArtifactAttached>true</shadedArtifactAttached>
               <shadedClassifierName>shaded</shadedClassifierName>
+              <!-- Set Main-Class so `java -jar` works -->
+              <transformers>
+                <transformer implementation="org.apache.maven.plugins.shade.resource.ManifestResourceTransformer">
+                  <mainClass>com.streetlens.options.api.ApiServer</mainClass>
+                </transformer>
+              </transformers>
             </configuration>
           </execution>
         </executions>
