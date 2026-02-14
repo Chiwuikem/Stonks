@@ -60,6 +60,7 @@ export default function CandleChart({
   // Refs for indicator charts and series
   const indicatorChartsRef = useRef<Map<string, IChartApi>>(new Map());
   const indicatorSeriesRef = useRef<Map<string, ISeriesApi<any>>>(new Map());
+  const macdSeriesRef = useRef<Map<string, { hist: ISeriesApi<any>; macd: ISeriesApi<any>; signal: ISeriesApi<any> }>>(new Map());
   const overlaySeriesRef = useRef<Map<string, ISeriesApi<"Line">>>(new Map());
 
   const usedColorsRef = useRef<Set<string>>(new Set());
@@ -301,8 +302,52 @@ export default function CandleChart({
   useEffect(() => {
     if (!candleSeriesRef.current) return;
     candleSeriesRef.current.setData(candles);
-    // Don't call fitContent() here - preserve user's zoom/pan position
-  }, [candles]);
+    
+    // Update overlay indicators
+    overlaySeriesRef.current.forEach((series, id) => {
+      const ind = indicators.find((i) => i.id === id);
+      if (!ind) return;
+
+      let data: { time: UTCTimestamp; value: number }[] = [];
+      if (ind.type === "sma") {
+        data = calculateSMA(candles, ind.period || 20);
+      } else if (ind.type === "ema") {
+        data = calculateEMA(candles, ind.period || 20);
+      } else if (ind.type === "vwap") {
+        data = calculateVWAP(candles);
+      }
+      series.setData(data);
+    });
+
+    // Update panel indicators
+    indicatorChartsRef.current.forEach((chart, id) => {
+      const ind = indicators.find((i) => i.id === id);
+      if (!ind) return;
+
+      if (ind.type === "volume") {
+        const series = indicatorSeriesRef.current.get(id);
+        if (!series) return;
+        const volumeData = candles.map((c) => ({
+          time: c.time,
+          value: c.volume || 0,
+          color: c.close >= c.open ? "#22c55e80" : "#ef444480",
+        }));
+        series.setData(volumeData);
+      } else if (ind.type === "rsi") {
+        const series = indicatorSeriesRef.current.get(id);
+        if (!series) return;
+        const rsiData = calculateRSI(candles);
+        series.setData(rsiData);
+      } else if (ind.type === "macd") {
+        const macdSeries = macdSeriesRef.current.get(id);
+        if (!macdSeries) return;
+        const { macdLine, signalLine, histogram } = calculateMACD(candles);
+        macdSeries.hist.setData(histogram);
+        macdSeries.macd.setData(macdLine);
+        macdSeries.signal.setData(signalLine);
+      }
+    });
+  }, [candles, indicators]);
 
   // Fit content only when explicitly requested
   useEffect(() => {
@@ -311,31 +356,48 @@ export default function CandleChart({
     }
   }, [shouldFitContent]);
 
-  // Sync time scales for all charts
+  // Sync time scales for all charts - rewritten to avoid conflicts
   useEffect(() => {
     if (!mainChartRef.current) return;
 
-    const charts = [mainChartRef.current, ...Array.from(indicatorChartsRef.current.values())];
-    
-    const syncTimeScale = (sourceChart: IChartApi) => {
-      const timeScale = sourceChart.timeScale();
-      const visibleRange = timeScale.getVisibleRange();
+    const allCharts = [
+      mainChartRef.current,
+      ...Array.from(indicatorChartsRef.current.values()),
+    ];
+
+    if (allCharts.length <= 1) return; // No sync needed with only main chart
+
+    // Use a flag to prevent circular updates
+    let isSyncing = false;
+
+    const syncFromMain = () => {
+      if (isSyncing || !mainChartRef.current) return;
+      
+      const visibleRange = mainChartRef.current.timeScale().getVisibleRange();
       if (!visibleRange) return;
 
-      charts.forEach((chart) => {
-        if (chart !== sourceChart) {
+      isSyncing = true;
+      
+      // Sync all indicator charts to main chart
+      indicatorChartsRef.current.forEach((chart) => {
+        try {
           chart.timeScale().setVisibleRange(visibleRange);
+        } catch (e) {
+          // Silently handle any sync errors
         }
       });
+      
+      isSyncing = false;
     };
 
-    // Subscribe to time range changes
-    charts.forEach((chart) => {
-      chart.timeScale().subscribeVisibleTimeRangeChange(() => syncTimeScale(chart));
-    });
+    // Only subscribe to main chart changes - one-way sync
+    mainChartRef.current.timeScale().subscribeVisibleTimeRangeChange(syncFromMain);
 
-    // Note: v3.8.0 doesn't provide unsubscribe, cleanup happens on chart.remove()
-  }, [indicators.length]);
+    // Initial sync
+    syncFromMain();
+
+    // Cleanup note: v3.8.0 subscriptions are cleaned up when chart.remove() is called
+  }, [indicators]);
 
   // Handle indicators
   useEffect(() => {
@@ -389,6 +451,7 @@ export default function CandleChart({
         chart.remove();
         indicatorChartsRef.current.delete(id);
         indicatorSeriesRef.current.delete(id);
+        macdSeriesRef.current.delete(id);
         const ind = indicators.find((i) => i.id === id);
         freeColor(ind?.color);
       }
@@ -510,15 +573,24 @@ export default function CandleChart({
           signalSeries.setData(signalLine);
 
           indicatorSeriesRef.current.set(ind.id, histSeries);
+          macdSeriesRef.current.set(ind.id, {
+            hist: histSeries,
+            macd: macdSeries,
+            signal: signalSeries,
+          });
         }
 
         // Don't call fitContent() here - preserve user's zoom/pan position
 
-        // Sync with main chart
+        // Sync with main chart's current visible range
         if (mainChartRef.current) {
           const mainRange = mainChartRef.current.timeScale().getVisibleRange();
           if (mainRange) {
-            chart.timeScale().setVisibleRange(mainRange);
+            try {
+              chart.timeScale().setVisibleRange(mainRange);
+            } catch (e) {
+              // If setting range fails, just use default
+            }
           }
         }
       }
